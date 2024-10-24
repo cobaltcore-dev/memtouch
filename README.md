@@ -1,46 +1,104 @@
 <!--
-# SPDX-FileCopyrightText: Copyright 2024 SAP SE or an SAP affiliate company and cobaltcore-dev contributors
+# SPDX-FileCopyrightText: Copyright 2025 SAP SE or an SAP affiliate company and cobaltcore-dev contributors
 #
 # SPDX-License-Identifier: Apache-2.0
 -->
 
-# SAP Repository Template
-
-Default templates for SAP open source repositories, including LICENSE, .reuse/dep5, Code of Conduct, etc... All repositories on github.com/SAP will be created based on this template.
-
-## To-Do
-
-In case you are the maintainer of a new SAP open source project, these are the steps to do with the template files:
-
-- Check if the default license (Apache 2.0) also applies to your project. A license change should only be required in exceptional cases. If this is the case, please change the [license file](LICENSE).
-- Enter the correct metadata for the REUSE tool. See our [wiki page](https://wiki.one.int.sap/wiki/display/ospodocs/Using+the+Reuse+Tool+of+FSFE+for+Copyright+and+License+Information) for details how to do it. You can find an initial REUSE.toml file to build on. Please replace the parts inside the single angle quotation marks < > by the specific information for your repository and be sure to run the REUSE tool to validate that the metadata is correct.
-- Adjust the contribution guidelines (e.g. add coding style guidelines, pull request checklists, different license if needed etc.)
-- Add information about your project to this README (name, description, requirements etc). Especially take care for the <your-project> placeholders - those ones need to be replaced with your project name. See the sections below the horizontal line and [our guidelines on our wiki page](https://wiki.one.int.sap/wiki/pages/viewpage.action?pageId=3564976048#GuidelinesforGitHubHealthfiles(Readme,Contributing,CodeofConduct)-Readme.md) what is required and recommended.
-- Remove all content in this README above and including the horizontal line ;)
-
-***
-
-# Our new open source project
+# memtouch
 
 ## About this project
 
-*Insert a short description of your project here...*
+Simple but configurable memory stresstest for UNIX-like systems to benchmark live
+migration.
 
-## Requirements and Setup
+## How to Build
 
-*Insert a short description what is required to get your project running...*
+### Nix Toolchain
+
+```bash
+git checkout <this repo>
+nix develop . # to get a toolchain to compile this regularly, or
+nix build . # to build this directly in Nix
+nix run . -- <args> # to run the artifact from Nix directly, e.g.: nix run -- --help
+```
+
+### Regular Toolchain
+
+```bash
+git checkout <this repo>
+git submodule update --init
+meson setup build
+ninja -C build
+./build/memtouch --help
+```
+
+## How to use
+
+```bash
+Usage: memtouch [--help] [--version] --thread_mem VAR --num_threads VAR --rw_ratio VAR [--random] [--stat_file VAR] [--stat_ival VAR]
+
+The measurements are given in Mebibyte per second. This means that increasing or 
+decreasing the interval has no effect on the read/write measurements, but only
+increase the accuracy in terms of time resolution.
+
+Optional arguments:
+  -h, --help      shows help message and exits
+  -v, --version   prints version information and exits
+  --thread_mem    amount of memory a thread touches in MiB [required]
+  --num_threads   number of worker threads [required]
+  --rw_ratio      read/write ratio where 0 means only reads and 100 only writes [required]
+  --stat_file     filepath where statistics are logged
+  --stat_ival     interval for statistics logging in ms
+  --page_log_ival log statistics after a specific number of pages have been read/written
+```
+
+### Example
+
+```bash
+$ ./memtouch --thread_mem 256 --num_threads 4 --rw_ratio 50 --stat_file ./stats.log --stat_ival 100
+Running 4 threads touching 256 MB of memory
+    memory consumption : 1024 MB
+    access pattern     : sequential
+    r/w ratio          : 50
+    statistics file    : ./stats.log
+    statistics interval: 100 ms
+
+# The measurements are given in Mebibyte per second.
+$ cat stats.log
+2024-10-29T21:51:03.315+0100 read_mibps:16809.49 write_mibps:17834.99
+2024-10-29T21:51:03.415+0100 read_mibps:15886.61 write_mibps:17992.63
+2024-10-29T21:51:03.515+0100 read_mibps:16129.03 write_mibps:17834.99
+```
+
+### Hints
+
+Ensure that `--thread_mem` is significantly higher than your L3 cache, if you
+want to test the main memory. Otherwise, you are testing the caches.
 
 ## Support, Feedback, Contributing
 
-This project is open to feature requests/suggestions, bug reports etc. via [GitHub issues](https://github.com/SAP/<your-project>/issues). Contribution and feedback are encouraged and always welcome. For more information about how to contribute, the project structure, as well as additional contribution information, see our [Contribution Guidelines](CONTRIBUTING.md).
+This project is open to feature requests/suggestions, bug reports etc. via 
+[GitHub issues](https://github.com/cobaltcore-dev/memtouch/issues). Contribution
+and feedback are encouraged and always welcome. For more information about how
+to contribute, the project structure, as well as additional contribution
+information, see our [Contribution Guidelines](CONTRIBUTING.md).
 
 ## Security / Disclosure
-If you find any bug that may be a security problem, please follow our instructions at [in our security policy](https://github.com/SAP/<your-project>/security/policy) on how to report it. Please do not create GitHub issues for security-related doubts or problems.
+
+Please do not create GitHub issues for security-related doubts or problems.
+Instead, contact the maintainers by Email.
 
 ## Code of Conduct
 
-We as members, contributors, and leaders pledge to make participation in our community a harassment-free experience for everyone. By participating in this project, you agree to abide by its [Code of Conduct](https://github.com/SAP/.github/blob/main/CODE_OF_CONDUCT.md) at all times.
+We as members, contributors, and leaders pledge to make participation in our
+community a harassment-free experience for everyone. By participating in this
+project, you agree to abide by its [Code of Conduct](https://github.com/SAP/.github/blob/main/CODE_OF_CONDUCT.md)
+at all times.
 
 ## Licensing
 
-Copyright (20xx-)20xx SAP SE or an SAP affiliate company and <your-project> contributors. Please see our [LICENSE](LICENSE) for copyright and license information. Detailed information including third-party components and their licensing/copyright information is available [via the REUSE tool](https://api.reuse.software/info/github.com/SAP/<your-project>).
+Copyright 2025 SAP SE or an SAP affiliate company and memtouch 
+contributors. Please see our [LICENSE](LICENSE) for copyright and license 
+information. Detailed information including third-party components and their
+licensing/copyright information is available
+[via the REUSE tool](https://api.reuse.software/info/github.com/cobaltcore-dev/memtouch).
