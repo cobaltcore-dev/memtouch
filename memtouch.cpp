@@ -18,9 +18,8 @@
 #endif
 
 static constexpr uint64_t PAGE_SIZE(4096);
-static constexpr int PATTERN(0xff);
-
-static constexpr int DEFAULT_STAT_IVAL(1000);
+static constexpr int      PATTERN(0xff);
+static constexpr int      DEFAULT_STAT_IVAL(1000);
 
 using namespace std;
 
@@ -39,7 +38,7 @@ struct Statistics {
 class WorkerThread {
  public:
   WorkerThread(unsigned id_,
-               bool run_once_,
+               bool     run_once_,
                unsigned mem_size_mib_,
                unsigned rw_ratio_,
                uint64_t page_log_ival_)
@@ -109,7 +108,7 @@ class WorkerThread {
 
     if (rw_ratio) {
       total_pages_to_write = (num_pages * rw_ratio) / 100;
-      total_pages_to_read = num_pages - total_pages_to_write;
+      total_pages_to_read  = num_pages - total_pages_to_write;
     }
 
     // Ensure that `page_log_ival` is not more than `pages_to_*`
@@ -119,7 +118,7 @@ class WorkerThread {
 
     // We touch all pages but we report the progress every %n pages
     while ((pages_read + pages_written) < num_pages) {
-      auto remaining_pages_to_read = total_pages_to_read - pages_read;
+      auto remaining_pages_to_read  = total_pages_to_read - pages_read;
       auto remaining_pages_to_write = total_pages_to_write - pages_written;
 
       // Effective pages to read in this iteration
@@ -129,35 +128,35 @@ class WorkerThread {
       auto pages_to_write_eff =
           std::min(pages_to_write_per_iter, remaining_pages_to_write);
 
-      auto time_read_ns = measure_time_ns([&]() {
+      auto time_read_ns  = measure_time_ns([&]() {
         for (uint64_t n{0}; n < pages_to_read_eff; ++n) {
           auto page = n + pages_read + pages_written;
           read_page(page, &read_buffer[0]);
         }
       });
-      pages_read += pages_to_read_eff;
+      pages_read        += pages_to_read_eff;
 
-      auto time_write_ns = measure_time_ns([&]() {
+      auto time_write_ns  = measure_time_ns([&]() {
         for (uint64_t n{0}; n < pages_to_write_eff; ++n) {
           auto page = n + pages_read + pages_written;
           write_page(page);
         }
       });
-      pages_written += pages_to_write_eff;
+      pages_written      += pages_to_write_eff;
 
       /* if we had reads */
       if (rw_ratio < 100 and pages_to_read_eff > 0) {
-        auto bytes = static_cast<float>(pages_to_read_eff * PAGE_SIZE);
+        auto bytes      = static_cast<float>(pages_to_read_eff * PAGE_SIZE);
         auto mebi_bytes = bytes / 1024.0f / 1024.0f;
-        auto seconds = static_cast<float>(time_read_ns) / 1000000000.0f;
+        auto seconds    = static_cast<float>(time_read_ns) / 1000000000.0f;
         stats.read_rate = mebi_bytes / seconds;
       }
 
       /* if we had writes */
       if (rw_ratio > 0 and pages_to_write_eff > 0) {
-        auto bytes = static_cast<float>(pages_to_write_eff * PAGE_SIZE);
-        auto mebi_bytes = bytes / 1024.0f / 1024.0f;
-        auto seconds = static_cast<float>(time_write_ns) / 1000000000.0f;
+        auto bytes       = static_cast<float>(pages_to_write_eff * PAGE_SIZE);
+        auto mebi_bytes  = bytes / 1024.0f / 1024.0f;
+        auto seconds     = static_cast<float>(time_write_ns) / 1000000000.0f;
         stats.write_rate = mebi_bytes / seconds;
       }
     }
@@ -192,7 +191,7 @@ class WorkerThread {
 
  private:
   unsigned id;
-  bool run_once;
+  bool     run_once;
   unsigned mem_size_mib;
   unsigned rw_ratio;
   uint64_t page_log_ival;
@@ -222,7 +221,7 @@ class StatisticsThread {
       float write_rate{0};
 
       for (auto& worker : workers) {
-        read_rate += worker.read_rate();
+        read_rate  += worker.read_rate();
         write_rate += worker.write_rate();
       }
 
@@ -272,16 +271,16 @@ class StatisticsThread {
  private:
   vector<WorkerThread>& workers;
 
-  bool terminate{false};
+  bool     terminate{false};
   unsigned logging_ival_ms{DEFAULT_STAT_IVAL};
 
   ofstream log_file{};
-  bool logging_enabled{false};
+  bool     logging_enabled{false};
 };
 
-vector<WorkerThread> worker_storage;
+vector<WorkerThread>       worker_storage;
 vector<unique_ptr<thread>> thread_storage;
-StatisticsThread stat_thread(worker_storage);
+StatisticsThread           stat_thread(worker_storage);
 
 void sigint_handler([[maybe_unused]] int s) {
   printf("Terminating...\n");
@@ -351,19 +350,19 @@ int main(int argc, char** argv) {
   setup_signals();
   setup_argparse(program, argc, argv);
 
-  auto thread_mem = program.get<unsigned>("--thread_mem");
+  auto thread_mem  = program.get<unsigned>("--thread_mem");
   auto num_threads = program.get<unsigned>("--num_threads");
-  auto rw_ratio = program.get<unsigned>("--rw_ratio");
-  auto once = program.get<bool>("--once");
+  auto rw_ratio    = program.get<unsigned>("--rw_ratio");
+  auto once        = program.get<bool>("--once");
 
   std::string stats_file;
-  unsigned stats_ival;
-  uint64_t page_log_ival;
+  unsigned    stats_ival;
+  uint64_t    page_log_ival;
 
   bool stats_requested{false};
 
   try {
-    stats_file = program.get<std::string>("--stat_file");
+    stats_file      = program.get<std::string>("--stat_file");
     stats_requested = true;
   } catch (const std::exception& err) {
   }
