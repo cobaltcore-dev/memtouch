@@ -6,8 +6,9 @@ on:
   push:
 
 jobs:
-  build_regular:
+  build_regular_and_check_style:
     runs-on: ubuntu-latest
+    name: "Build (regular) + Check Style"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -16,6 +17,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y meson ninja-build
       - name: build
         run: meson setup build && ninja -C build
+      - name: check
+        run: ninja -C build clang-format-check
       - name: test
         run: ./build/memtouch --help
 
