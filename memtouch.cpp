@@ -26,7 +26,7 @@ using namespace std;
 struct Statistics {
   Statistics() = default;
 
-  Statistics(Statistics&& o) {
+  Statistics(Statistics&& o) noexcept {
     write_rate.store(o.write_rate.load());
     read_rate.store(o.read_rate.load());
   }
@@ -232,7 +232,7 @@ class StatisticsThread {
         log_file.flush();
       }
 
-      usleep(uint64_t(logging_ival_ms) * 1000);
+      usleep(logging_ival_ms * 1000);
     }
   }
 
@@ -416,13 +416,13 @@ int main(int argc, char** argv) {
   }
 
   for (unsigned num_thread = 0; num_thread < num_threads; num_thread++) {
-    thread_storage.emplace_back(std::move(make_unique<thread>(
-        &WorkerThread::run, &worker_storage.at(num_thread))));
+    thread_storage.emplace_back(make_unique<thread>(
+        &WorkerThread::run, &worker_storage.at(num_thread)));
   }
 
   if (stats_requested and not once) {
     thread_storage.emplace_back(
-        std::move(make_unique<thread>(&StatisticsThread::run, &stat_thread)));
+        make_unique<thread>(&StatisticsThread::run, &stat_thread));
   }
 
   for (auto& t : thread_storage) {

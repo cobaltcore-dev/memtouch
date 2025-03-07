@@ -17,8 +17,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y meson ninja-build
       - name: build
         run: meson setup build && ninja -C build
-      - name: check
+      - name: check format
         run: ninja -C build clang-format-check
+      - name: check lints
+        run: ninja -C build clang-tidy
       - name: test
         run: ./build/memtouch --help
 
