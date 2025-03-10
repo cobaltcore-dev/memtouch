@@ -1,0 +1,38 @@
+---
+Checks: |
+  # General best practices
+  - modernize-use-nullptr      # Use nullptr instead of NULL
+  - modernize-loop-convert     # Convert traditional for-loops to range-based for-loops where applicable
+  - modernize-raw-string-literal # Prefer raw string literals over escaping special characters in strings
+
+  # Code correctness and safety
+  - cert-dcl21-cpp             # Detects variables that might be used before being initialized
+  - cppcoreguidelines-avoid-magic-numbers # Avoid magic numbers in code
+  - cppcoreguidelines-narrowing-conversions # Warn about narrowing conversions
+
+  # Readability and maintainability
+  - readability-identifier-naming  # Ensures naming conventions for variables, functions, etc.
+  - readability-function-size      # Functions should be small and only do one thing
+  - readability-const-return-type  # Ensure return types are `const` if the value is not intended to be modified
+
+  # Performance improvements
+  - performance-inefficient-vector-operation # Detects inefficient use of vectors (like using `push_back` in a loop)
+  - performance-unnecessary-copy-initialization # Warn about unnecessary copies
+
+  # Miscellaneous
+  - google-build-using-namespace # Warn if `using namespace` is used in header files
+  - clang-analyzer-core.uninitialized.Memory # Detect uninitialized memory
+  - clang-analyzer-core.NullDereference # Detect dereferencing null pointers
+  - clang-analyzer-optin.performance.Padding # Detect padding in structures/classes
+  - bugprone-unused-raii # Warn if a RAII object is unused
+
+WarningsAsErrors: '*'
+CheckOptions:
+  - key:            modernize-use-nullptr.NullMacros
+    value:          '0'  # Avoid checking for NULL macros.
+  - key:            readability-identifier-naming.EnumNameCase
+    value:          'CamelCase'  # Make enum names use CamelCase.
+  - key:            readability-identifier-naming.VariableCase
+    value:          'lower_case'  # Variable names should use snake_case.
+  - key:            readability-identifier-naming.FunctionCase
+    value:          'camelCase'  # Function names should use camelCase.

@@ -7,6 +7,7 @@ on:
 
 jobs:
   build_regular:
+    name: "Build (regular)"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -14,24 +15,47 @@ jobs:
           submodules: 'true'
       - name: install prerequisites
         run: sudo apt-get update && sudo apt-get install -y meson ninja-build
+      - name: prepare build directory
+        run: meson setup build
       - name: build
-        run: meson setup build && ninja -C build
-      - name: test
+        run: ninja -C build
+      - name: test --help
         run: ./build/memtouch --help
 
-  build_nix_shell:
+  # We use a Nix toolchain for the style checks, as we rely on clang-format v19
+  # for some clang-format options.
+  style_check:
+    name: "Style Checks"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: 'true'
       - uses: cachix/install-nix-action@v30
+      - name: prepare build directory
+        run: nix develop -i --command bash -c "meson setup build"
+      - name: format
+        run: nix develop -i --command bash -c " ninja -C build clang-format-check"
+      - name: lints
+        run: nix develop --command bash -c " ninja -C build clang-tidy"
+
+  build_nix_shell:
+    name: "Build (regular with Nix shell toolchain)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+      - uses: cachix/install-nix-action@v30
+      - name: prepare build directory
+        run: nix develop -i --command bash -c "meson setup build"
       - name: build
-        run: nix develop -i --command bash -c "meson setup build && ninja -C build"
-      - name: test
+        run: nix develop -i --command bash -c "ninja -C build"
+      - name: test --help
         run: nix develop -i --command bash -c "./build/memtouch --help"
 
   build_nix:
+    name: "Build (Nix)"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

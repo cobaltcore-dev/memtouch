@@ -51,6 +51,7 @@
               cp -r ${argparse}/. contrib/argparse
             '';
             nativeBuildInputs = with pkgs; [
+              clang-tools # clang-format and clang-tidy
               meson
               ninja
             ];
