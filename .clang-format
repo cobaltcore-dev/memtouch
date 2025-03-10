@@ -62,3 +62,5 @@ AlignOperands:   Align
 AlignTrailingComments:
   Kind:            Always
   OverEmptyLines:  0
+IndentWidth: 4
+ColumnLimit: 100
