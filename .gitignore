@@ -2,3 +2,5 @@
 /buildDir # default meson build dir by CLion IDE
 /memtouch
 /result*
+
+__pycache__

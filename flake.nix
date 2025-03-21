@@ -20,6 +20,8 @@
       devShells.x86_64-linux.default = pkgs.mkShell {
         inputsFrom = [ self.packages.x86_64-linux.memtouch ];
         packages = with pkgs; [
+          # Check last commit locally: `gitlint --debug`
+          gitlint
           nixfmt-rfc-style
         ];
       };
