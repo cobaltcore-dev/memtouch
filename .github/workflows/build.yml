@@ -10,7 +10,7 @@ jobs:
     name: "Build (regular)"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           submodules: 'true'
       - name: install prerequisites
@@ -28,7 +28,7 @@ jobs:
     name: "Style Checks"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           submodules: 'true'
       - uses: cachix/install-nix-action@v31
@@ -43,7 +43,7 @@ jobs:
     name: "Build (regular with Nix shell toolchain)"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           submodules: 'true'
       - uses: cachix/install-nix-action@v31
@@ -58,7 +58,7 @@ jobs:
     name: "Build (Nix)"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: cachix/install-nix-action@v31
       - name: nix build
         run: nix build .
