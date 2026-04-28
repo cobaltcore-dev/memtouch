@@ -2,6 +2,9 @@
 
 #include <algorithm>
 #include <chrono>
+#include <consts.hpp>
+#include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <functional>
@@ -12,14 +15,15 @@
 #include <assert.h>
 #include <signal.h>
 #include <sys/mman.h>
+#include <xmmintrin.h>
+
+#if defined(__x86_64__)
+#include <write_pages_avx512.hpp>
+#endif
 
 #ifndef PROJECT_VERSION
 #define PROJECT_VERSION "0.0.0"
 #endif
-
-static constexpr uint64_t PAGE_SIZE(4096);
-static constexpr int      PATTERN(0xff);
-static constexpr int      DEFAULT_STAT_IVAL(1000);
 
 using namespace std;
 
@@ -41,13 +45,16 @@ class WorkerThread {
                  bool     run_once_,
                  unsigned mem_size_mib_,
                  unsigned rw_ratio_,
-                 uint64_t page_log_ival_)
+                 uint64_t page_log_ival_,
+                 bool     no_avx_)
         : id(id_),
           run_once(run_once_),
           mem_size_mib(mem_size_mib_),
           rw_ratio(rw_ratio_),
           page_log_ival(page_log_ival_),
-          stats() {}
+          stats() {
+        avx512_streaming = __builtin_cpu_supports("avx512f") && (!no_avx_);
+    }
 
     bool pre_run() {
         if (not allocate_memory()) {
@@ -55,6 +62,10 @@ class WorkerThread {
             return false;
         }
 
+        if (avx512_streaming) {
+            auto addr_base = reinterpret_cast<uint64_t>(mem_base);
+            assert((addr_base % 64) == 0);
+        }
         return true;
     }
 
@@ -68,7 +79,7 @@ class WorkerThread {
             if (terminate) {
                 break;
             }
-            write_page(page);
+            write_pages(page, 1);
         }
 
         if (run_once) {
@@ -133,12 +144,8 @@ class WorkerThread {
 
             pages_read += pages_to_read_eff;
 
-            auto time_write_ns = measure_time_ns([&]() {
-                for (uint64_t n{0}; n < pages_to_write_eff; ++n) {
-                    auto page = n + pages_read + pages_written;
-                    write_page(page);
-                }
-            });
+            auto time_write_ns = measure_time_ns(
+                [&]() { write_pages(pages_read + pages_written, pages_to_write_eff); });
 
             pages_written += pages_to_write_eff;
 
@@ -162,6 +169,17 @@ class WorkerThread {
 
     void write_page(uint64_t page) {
         memset(static_cast<char*>(mem_base) + page * PAGE_SIZE, PATTERN, PAGE_SIZE);
+    }
+
+    void write_pages(uint64_t page_start, uint64_t num_pages) {
+        if (avx512_streaming) {
+            return streaming_write_pages_avx512(mem_base, page_start, num_pages);
+        }
+
+        for (uint64_t n{0}; n < num_pages; ++n) {
+            auto page = page_start + n;
+            write_page(page);
+        }
     }
 
     void read_page(uint64_t page, void* buffer) {
@@ -193,6 +211,7 @@ class WorkerThread {
     unsigned mem_size_mib;
     unsigned rw_ratio;
     uint64_t page_log_ival;
+    bool     avx512_streaming;
 
     bool terminate{false};
 
@@ -330,6 +349,11 @@ void setup_argparse(argparse::ArgumentParser& program, int argc, char** argv) {
         .default_value(false)
         .implicit_value(true);
 
+    program.add_argument("--no_avx")
+        .help("disable 512-bit non-temporal writes even if they are available")
+        .default_value(false)
+        .implicit_value(true);
+
     try {
         program.parse_args(argc, argv);
     } catch (const std::exception& err) {
@@ -349,6 +373,7 @@ int main(int argc, char** argv) {
     auto num_threads = program.get<unsigned>("--num_threads");
     auto rw_ratio    = program.get<unsigned>("--rw_ratio");
     auto once        = program.get<bool>("--once");
+    auto no_avx      = program.get<bool>("--no_avx");
 
     std::string stats_file;
     unsigned    stats_ival;
@@ -401,7 +426,7 @@ int main(int argc, char** argv) {
     thread_storage.reserve(num_threads + 1 /* statistics thread */);
 
     for (unsigned num_thread = 0; num_thread < num_threads; num_thread++) {
-        worker_storage.emplace_back(num_thread, once, thread_mem, rw_ratio, page_log_ival);
+        worker_storage.emplace_back(num_thread, once, thread_mem, rw_ratio, page_log_ival, no_avx);
         if (not worker_storage.back().pre_run()) {
             worker_storage.clear();
             return 1;
