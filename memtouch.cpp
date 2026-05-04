@@ -3,12 +3,17 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <functional>
 #include <memory>
 #include <thread>
 #include <vector>
+
+#if defined(__x86_64__)
+#include <emmintrin.h>
+#endif
 
 #include <assert.h>
 #include <signal.h>
@@ -209,6 +214,44 @@ class WorkerThread {
     void write_page(uint64_t page) {
         memset(static_cast<char*>(mem_base) + page * PAGE_SIZE, PATTERN, PAGE_SIZE);
     }
+
+    void write_pages(uint64_t page_start, uint64_t num_pages) {
+#if defined(__x86_64__)
+        return write_pages_nt(page_start, num_pages);
+#endif
+
+        for (uint64_t n{0}; n < num_pages; ++n) {
+            auto page = page_start + n;
+            write_page(page);
+        }
+    }
+
+#if defined(__x86_64__)
+    void write_pages_nt(uint64_t page_start, uint64_t num_pages) {
+        // This requires SSE2 which is always available on x86_64
+        auto pattern = _mm_set1_epi8(static_cast<int8_t>(PATTERN));
+
+        static_assert((PAGE_SIZE % (16 * 4)) == 0, "PAGE SIZE is not a multiple of 16");
+        auto num_iterations = (PAGE_SIZE / (16 * 4)) * num_pages;
+
+        char* mem_addr = ((char*)mem_base) + (page_start * PAGE_SIZE);
+
+        for (uint64_t n{0}; n < num_iterations; ++n) {
+            // This requires SSE2 which is always available on x86_64.
+            // The `pre_run` method ensures that mem_base is a multiple of 16
+            _mm_stream_si128(reinterpret_cast<__m128i*>(mem_addr), pattern);
+            _mm_stream_si128(reinterpret_cast<__m128i*>(mem_addr + (16)), pattern);
+            _mm_stream_si128(reinterpret_cast<__m128i*>(mem_addr + (2 * 16)), pattern);
+            _mm_stream_si128(reinterpret_cast<__m128i*>(mem_addr + (3 * 16)), pattern);
+
+            mem_addr += 4 * 16;
+        }
+
+        // Non-temporal stores are weakly ordered hence we apply a fence to ensure that
+        // our stores are ordered before any subsequent (in program order) loads and stores.
+        _mm_sfence();
+    }
+#endif
 
     void read_page(uint64_t page, void* buffer) {
         memcpy(buffer, static_cast<char*>(mem_base) + page * PAGE_SIZE, PAGE_SIZE);
