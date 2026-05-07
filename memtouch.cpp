@@ -1,6 +1,7 @@
 #include <argparse.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <fstream>
@@ -21,14 +22,24 @@ static constexpr uint64_t PAGE_SIZE(4096);
 static constexpr int      PATTERN(0xff);
 static constexpr int      DEFAULT_STAT_IVAL(1000);
 
+static std::atomic<bool> global_terminate{false};
+
 using namespace std;
 
 struct Statistics {
-    Statistics() = default;
+    Statistics()                             = default;
+    Statistics(const Statistics&)            = delete;
+    Statistics& operator=(const Statistics&) = delete;
 
     Statistics(Statistics&& o) noexcept {
         write_rate.store(o.write_rate.load());
         read_rate.store(o.read_rate.load());
+    }
+
+    Statistics& operator=(Statistics&& o) noexcept {
+        write_rate.store(o.write_rate.load());
+        read_rate.store(o.read_rate.load());
+        return *this;
     }
 
     std::atomic<float> read_rate{0};
@@ -49,6 +60,43 @@ class WorkerThread {
           page_log_ival(page_log_ival_),
           stats() {}
 
+    ~WorkerThread() { cleanup_memory(); }
+
+    WorkerThread(const WorkerThread&)            = delete;
+    WorkerThread& operator=(const WorkerThread&) = delete;
+
+    WorkerThread(WorkerThread&& o) noexcept
+        : id(o.id),
+          run_once(o.run_once),
+          mem_size_mib(o.mem_size_mib),
+          rw_ratio(o.rw_ratio),
+          page_log_ival(o.page_log_ival),
+          mem_base(o.mem_base),
+          read_buffer(),
+          stats(std::move(o.stats)) {
+        o.mem_base = nullptr;
+    }
+
+    WorkerThread& operator=(WorkerThread&& o) noexcept {
+        if (this == &o) {
+            return *this;
+        }
+
+        cleanup_memory();
+
+        id            = o.id;
+        run_once      = o.run_once;
+        mem_size_mib  = o.mem_size_mib;
+        rw_ratio      = o.rw_ratio;
+        page_log_ival = o.page_log_ival;
+        mem_base      = o.mem_base;
+        stats         = std::move(o.stats);
+
+        o.mem_base = nullptr;
+
+        return *this;
+    }
+
     bool pre_run() {
         if (not allocate_memory()) {
             printf("Worker %d: Unable to allocate memory\n", id);
@@ -65,21 +113,19 @@ class WorkerThread {
 
         // Warmup, write every page
         for (uint64_t page{0}; page < num_pages; ++page) {
-            if (terminate) {
+            if (global_terminate.load(std::memory_order_relaxed)) {
                 break;
             }
             write_page(page);
         }
 
         if (run_once) {
-            kill();
+            return;
         }
 
-        while (not terminate) {
+        while (not global_terminate.load(std::memory_order_relaxed)) {
             run_loop(num_pages);
         }
-
-        cleanup_memory();
     }
 
     int64_t measure_time_ns(std::function<void()> func) {
@@ -169,9 +215,15 @@ class WorkerThread {
     }
 
     void cleanup_memory() {
+        if (mem_base == nullptr || mem_base == MAP_FAILED) {
+            return;
+        }
+
         if (munmap(mem_base, uint64_t(mem_size_mib) * 1024 * 1024) != 0) {
             printf("Unable to unmap memory\n");
+            return;
         }
+        mem_base = nullptr;
     }
 
     bool allocate_memory() {
@@ -180,8 +232,6 @@ class WorkerThread {
 
         return mem_base != MAP_FAILED;
     }
-
-    void kill() { terminate = true; }
 
     float write_rate() const { return stats.write_rate.load(); }
 
@@ -193,8 +243,6 @@ class WorkerThread {
     unsigned mem_size_mib;
     unsigned rw_ratio;
     uint64_t page_log_ival;
-
-    bool terminate{false};
 
     void* mem_base{nullptr};
 
@@ -214,7 +262,7 @@ class StatisticsThread {
     }
 
     void run() {
-        while (not terminate) {
+        while (not global_terminate.load(std::memory_order_relaxed)) {
             float read_rate{0};
             float write_rate{0};
 
@@ -233,8 +281,6 @@ class StatisticsThread {
             usleep(logging_ival_ms * 1000);
         }
     }
-
-    void kill() { terminate = true; }
 
     void set_interval(unsigned ival_ms) { logging_ival_ms = ival_ms; }
 
@@ -267,7 +313,6 @@ class StatisticsThread {
    private:
     vector<WorkerThread>& workers;
 
-    bool     terminate{false};
     unsigned logging_ival_ms{DEFAULT_STAT_IVAL};
 
     ofstream log_file{};
@@ -280,11 +325,11 @@ StatisticsThread           stat_thread(worker_storage);
 
 void sigint_handler([[maybe_unused]] int s) {
     printf("Terminating...\n");
-    for (auto& worker : worker_storage) {
-        worker.kill();
-    }
 
-    stat_thread.kill();
+    static_assert(std::atomic<bool>::is_always_lock_free,
+                  "Unable to ensure async-signal-handler safety: std::atomic<bool> should always "
+                  "be lock free, but the assertion failed.");
+    global_terminate.store(true, std::memory_order_relaxed);
 }
 
 void setup_signals() {
