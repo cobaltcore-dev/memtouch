@@ -24,11 +24,19 @@ static constexpr int      DEFAULT_STAT_IVAL(1000);
 using namespace std;
 
 struct Statistics {
-    Statistics() = default;
+    Statistics()                             = default;
+    Statistics(const Statistics&)            = delete;
+    Statistics& operator=(const Statistics&) = delete;
 
     Statistics(Statistics&& o) noexcept {
         write_rate.store(o.write_rate.load());
         read_rate.store(o.read_rate.load());
+    }
+
+    Statistics& operator=(Statistics&& o) noexcept {
+        write_rate.store(o.write_rate.load());
+        read_rate.store(o.read_rate.load());
+        return *this;
     }
 
     std::atomic<float> read_rate{0};
@@ -48,6 +56,43 @@ class WorkerThread {
           rw_ratio(rw_ratio_),
           page_log_ival(page_log_ival_),
           stats() {}
+
+    ~WorkerThread() { cleanup_memory(); }
+
+    WorkerThread(const WorkerThread&)            = delete;
+    WorkerThread& operator=(const WorkerThread&) = delete;
+
+    WorkerThread(WorkerThread&& o) noexcept
+        : id(o.id),
+          run_once(o.run_once),
+          mem_size_mib(o.mem_size_mib),
+          rw_ratio(o.rw_ratio),
+          page_log_ival(o.page_log_ival),
+          mem_base(o.mem_base),
+          read_buffer(),
+          stats(std::move(o.stats)) {
+        o.mem_base = nullptr;
+    }
+
+    WorkerThread& operator=(WorkerThread&& o) noexcept {
+        if (this == &o) {
+            return *this;
+        }
+
+        cleanup_memory();
+
+        id            = o.id;
+        run_once      = o.run_once;
+        mem_size_mib  = o.mem_size_mib;
+        rw_ratio      = o.rw_ratio;
+        page_log_ival = o.page_log_ival;
+        mem_base      = o.mem_base;
+        stats         = std::move(o.stats);
+
+        o.mem_base = nullptr;
+
+        return *this;
+    }
 
     bool pre_run() {
         if (not allocate_memory()) {
@@ -78,8 +123,6 @@ class WorkerThread {
         while (not terminate) {
             run_loop(num_pages);
         }
-
-        cleanup_memory();
     }
 
     int64_t measure_time_ns(std::function<void()> func) {
