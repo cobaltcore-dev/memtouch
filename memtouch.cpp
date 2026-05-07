@@ -169,9 +169,15 @@ class WorkerThread {
     }
 
     void cleanup_memory() {
+        if (mem_base == nullptr || mem_base == MAP_FAILED) {
+            return;
+        }
+
         if (munmap(mem_base, uint64_t(mem_size_mib) * 1024 * 1024) != 0) {
             printf("Unable to unmap memory\n");
+            return;
         }
+        mem_base = nullptr;
     }
 
     bool allocate_memory() {
