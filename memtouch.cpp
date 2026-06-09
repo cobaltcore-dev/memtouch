@@ -3,12 +3,17 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <functional>
 #include <memory>
 #include <thread>
 #include <vector>
+
+#if defined(__x86_64__)
+#include <emmintrin.h>
+#endif
 
 #include <assert.h>
 #include <signal.h>
@@ -52,12 +57,14 @@ class WorkerThread {
                  bool     run_once_,
                  unsigned mem_size_mib_,
                  unsigned rw_ratio_,
-                 uint64_t page_log_ival_)
+                 uint64_t page_log_ival_,
+                 bool     streaming_writes_)
         : id(id_),
           run_once(run_once_),
           mem_size_mib(mem_size_mib_),
           rw_ratio(rw_ratio_),
           page_log_ival(page_log_ival_),
+          streaming_writes(streaming_writes_),
           stats() {}
 
     ~WorkerThread() { cleanup_memory(); }
@@ -71,6 +78,7 @@ class WorkerThread {
           mem_size_mib(o.mem_size_mib),
           rw_ratio(o.rw_ratio),
           page_log_ival(o.page_log_ival),
+          streaming_writes(o.streaming_writes),
           mem_base(o.mem_base),
           read_buffer(),
           stats(std::move(o.stats)) {
@@ -84,13 +92,14 @@ class WorkerThread {
 
         cleanup_memory();
 
-        id            = o.id;
-        run_once      = o.run_once;
-        mem_size_mib  = o.mem_size_mib;
-        rw_ratio      = o.rw_ratio;
-        page_log_ival = o.page_log_ival;
-        mem_base      = o.mem_base;
-        stats         = std::move(o.stats);
+        id               = o.id;
+        run_once         = o.run_once;
+        mem_size_mib     = o.mem_size_mib;
+        rw_ratio         = o.rw_ratio;
+        page_log_ival    = o.page_log_ival;
+        streaming_writes = o.streaming_writes;
+        mem_base         = o.mem_base;
+        stats            = std::move(o.stats);
 
         o.mem_base = nullptr;
 
@@ -102,6 +111,15 @@ class WorkerThread {
             printf("Worker %d: Unable to allocate memory\n", id);
             return false;
         }
+
+#if defined(__x86_64__)
+        if (streaming_writes) {
+            // The following assertion should pass because the allocated memory is backed by a
+            // memory map which are always aligned to the page size.
+            auto addr_base = reinterpret_cast<uint64_t>(mem_base);
+            assert((addr_base % 16) == 0);
+        }
+#endif
 
         return true;
     }
@@ -116,7 +134,7 @@ class WorkerThread {
             if (global_terminate.load(std::memory_order_relaxed)) {
                 break;
             }
-            write_page(page);
+            write_pages(page, 1);
         }
 
         if (run_once) {
@@ -179,12 +197,8 @@ class WorkerThread {
 
             pages_read += pages_to_read_eff;
 
-            auto time_write_ns = measure_time_ns([&]() {
-                for (uint64_t n{0}; n < pages_to_write_eff; ++n) {
-                    auto page = n + pages_read + pages_written;
-                    write_page(page);
-                }
-            });
+            auto time_write_ns = measure_time_ns(
+                [&]() { write_pages(pages_read + pages_written, pages_to_write_eff); });
 
             pages_written += pages_to_write_eff;
 
@@ -209,6 +223,46 @@ class WorkerThread {
     void write_page(uint64_t page) {
         memset(static_cast<char*>(mem_base) + page * PAGE_SIZE, PATTERN, PAGE_SIZE);
     }
+
+    void write_pages(uint64_t page_start, uint64_t num_pages) {
+#if defined(__x86_64__)
+        if (streaming_writes) {
+            return write_pages_nt(page_start, num_pages);
+        }
+#endif
+
+        for (uint64_t n{0}; n < num_pages; ++n) {
+            auto page = page_start + n;
+            write_page(page);
+        }
+    }
+
+#if defined(__x86_64__)
+    void write_pages_nt(uint64_t page_start, uint64_t num_pages) {
+        // This requires SSE2 which is always available on x86_64
+        auto pattern = _mm_set1_epi8(static_cast<int8_t>(PATTERN));
+
+        static_assert((PAGE_SIZE % (16 * 4)) == 0, "PAGE SIZE is not a multiple of 16");
+        auto num_iterations = (PAGE_SIZE / (16 * 4)) * num_pages;
+
+        char* mem_addr = ((char*)mem_base) + (page_start * PAGE_SIZE);
+
+        for (uint64_t n{0}; n < num_iterations; ++n) {
+            // This requires SSE2 which is always available on x86_64.
+            // The `pre_run` method ensures that mem_base is a multiple of 16
+            _mm_stream_si128(reinterpret_cast<__m128i*>(mem_addr), pattern);
+            _mm_stream_si128(reinterpret_cast<__m128i*>(mem_addr + (16)), pattern);
+            _mm_stream_si128(reinterpret_cast<__m128i*>(mem_addr + (2 * 16)), pattern);
+            _mm_stream_si128(reinterpret_cast<__m128i*>(mem_addr + (3 * 16)), pattern);
+
+            mem_addr += 4 * 16;
+        }
+
+        // Non-temporal stores are weakly ordered hence we apply a fence to ensure that
+        // our stores are ordered before any subsequent (in program order) loads and stores.
+        _mm_sfence();
+    }
+#endif
 
     void read_page(uint64_t page, void* buffer) {
         memcpy(buffer, static_cast<char*>(mem_base) + page * PAGE_SIZE, PAGE_SIZE);
@@ -243,6 +297,7 @@ class WorkerThread {
     unsigned mem_size_mib;
     unsigned rw_ratio;
     uint64_t page_log_ival;
+    bool     streaming_writes;
 
     void* mem_base{nullptr};
 
@@ -375,6 +430,13 @@ void setup_argparse(argparse::ArgumentParser& program, int argc, char** argv) {
         .default_value(false)
         .implicit_value(true);
 
+    program.add_argument("--nt_stores")
+        .help(
+            "Provide a non-temporal hint when writing memory pages. This can increase write "
+            "throughput")
+        .default_value(false)
+        .implicit_value(true);
+
     try {
         program.parse_args(argc, argv);
     } catch (const std::exception& err) {
@@ -390,10 +452,11 @@ int main(int argc, char** argv) {
     setup_signals();
     setup_argparse(program, argc, argv);
 
-    auto thread_mem  = program.get<unsigned>("--thread_mem");
-    auto num_threads = program.get<unsigned>("--num_threads");
-    auto rw_ratio    = program.get<unsigned>("--rw_ratio");
-    auto once        = program.get<bool>("--once");
+    auto thread_mem       = program.get<unsigned>("--thread_mem");
+    auto num_threads      = program.get<unsigned>("--num_threads");
+    auto rw_ratio         = program.get<unsigned>("--rw_ratio");
+    auto once             = program.get<bool>("--once");
+    auto streaming_writes = program.get<bool>("--nt_stores");
 
     std::string stats_file;
     unsigned    stats_ival;
@@ -446,7 +509,8 @@ int main(int argc, char** argv) {
     thread_storage.reserve(num_threads + 1 /* statistics thread */);
 
     for (unsigned num_thread = 0; num_thread < num_threads; num_thread++) {
-        worker_storage.emplace_back(num_thread, once, thread_mem, rw_ratio, page_log_ival);
+        worker_storage.emplace_back(num_thread, once, thread_mem, rw_ratio, page_log_ival,
+                                    streaming_writes);
         if (not worker_storage.back().pre_run()) {
             worker_storage.clear();
             return 1;
